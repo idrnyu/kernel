@@ -424,3 +424,19 @@
 		};
 	};
 };
+
+&vop {
+	status = "okay";
+};
+
+&vop_mmu {
+	status = "okay";
+};
+
+&display_subsystem {
+	status = "okay";
+};
+
+&hdmi {
+	status = "okay";
+};
