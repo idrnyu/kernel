@@ -197,11 +197,69 @@ static int rockchip_hdmi_update_phy_table(struct rockchip_hdmi *hdmi,
 	return 0;
 }
 
+const struct inno_phy_config_tab inno_pll_table[] = {
+	{27000000,	27000000,	8,	1,	90,	3,	2,
+		2,	10,	3,	3,	4,	0,	1,	40,
+		8},
+	{27000000,	33750000,	10,	1,	90,	1,	3,
+		3,	10,	3,	3,	4,	0,	1,	40,
+		8},
+	{40000000,      40000000,       8,      1,      80,     2,      2,
+		2,      12,     2,      2,      2,      0,      1,      40,
+		8},
+	{59400000,	59400000,	8,	1,	99,	3,	2,
+		2,	1,	3,	3,	4,	0,	1,	40,
+		8},
+	{59400000,	74250000,	10,	1,	99,	1,	2,
+		2,	1,	3,	3,	4,	0,	1,	40,
+		8},
+	{74250000,	74250000,	8,	1,	99,	1,	2,
+		2,	1,	2,	3,	4,	0,	1,	40,
+		8},
+	{74250000,	92812500,	10,	4,	495,	1,	2,
+		2,	1,	3,	3,	4,	0,	2,	40,
+		4},
+	{148500000,	148500000,	8,	1,	99,	1,	1,
+		1,	1,	2,	2,	2,	0,	2,	40,
+		4},
+	{148500000,	185625000,	10,	4,	495,	0,	2,
+		2,	1,	3,	2,	2,	0,	4,	40,
+		2},
+	{297000000,	297000000,	8,	1,	99,	0,	1,
+		1,	1,	0,	2,	2,	0,	4,	40,
+		2},
+	{297000000,	371250000,	10,	4,	495,	1,	2,
+		0,	1,	3,	1,	1,	0,	8,	40,
+		1},
+	{594000000,	297000000,	8,	1,	99,	0,	1,
+		1,	1,	0,	2,	1,	0,	4,	40,
+		2},
+	{594000000,	371250000,	10,	4,	495,	1,	2,
+		0,	1,	3,	1,	1,	1,	8,	40,
+		1},
+	{594000000,	594000000,	8,	1,	99,	0,	2,
+		0,	1,	0,	1,	1,	0,	8,	40,
+		1},
+
+	{ ~0UL,	     	0, 		0, 	0,	0,	0,	0,
+		0,	0,	0,	0,	0,	0,	0,	0,
+		0},
+};
+
 static int rockchip_hdmi_parse_dt(struct rockchip_hdmi *hdmi)
 {
 	struct device_node *np = hdmi->dev->of_node;
 	int ret, val, phy_table_size;
 	u32 *phy_config;
+
+	if (hdmi->dev_type == RK3328_HDMI) {
+		hdmi->regmap = syscon_regmap_lookup_by_phandle(np, "rockchip,grf");
+		if (IS_ERR(hdmi->regmap)) {
+			dev_err(hdmi->dev, "Unable to get rockchip,grf\n");
+			return PTR_ERR(hdmi->regmap);
+		}
+		return 0;
+	}
 
 	hdmi->regmap = syscon_regmap_lookup_by_phandle(np, "rockchip,grf");
 	if (IS_ERR(hdmi->regmap)) {
@@ -360,7 +418,6 @@ static void dw_hdmi_rockchip_encoder_enable(struct drm_encoder *encoder)
 		val = HIWORD_UPDATE(lcdsel_mask, lcdsel_mask);
 	else
 		val = HIWORD_UPDATE(0, lcdsel_mask);
-
 	ret = clk_prepare_enable(hdmi->grf_clk);
 	if (ret < 0) {
 		dev_err(hdmi->dev, "failed to enable grfclk %d\n", ret);
@@ -416,9 +473,20 @@ static const struct dw_hdmi_plat_data rk3399_hdmi_drv_data = {
 	.dev_type   = RK3399_HDMI,
 };
 
+static const struct dw_hdmi_plat_data rk3328_hdmi_drv_data = {
+	.mode_valid = dw_hdmi_rockchip_mode_valid,
+	.mpll_cfg   = rockchip_mpll_cfg,
+	.cur_ctr    = rockchip_cur_ctr,
+	.inno_phy_config = inno_pll_table,
+	.dev_type   = RK3328_HDMI,
+};
+
 static const struct of_device_id dw_hdmi_rockchip_dt_ids[] = {
 	{ .compatible = "rockchip,rk3288-dw-hdmi",
 	  .data = &rk3288_hdmi_drv_data
+	},
+	{ .compatible = "rockchip,rk3328-dw-hdmi",
+	  .data = &rk3328_hdmi_drv_data
 	},
 	{ .compatible = "rockchip,rk3399-dw-hdmi",
 	  .data = &rk3399_hdmi_drv_data
@@ -426,6 +494,7 @@ static const struct of_device_id dw_hdmi_rockchip_dt_ids[] = {
 	{},
 };
 MODULE_DEVICE_TABLE(of, dw_hdmi_rockchip_dt_ids);
+
 
 static int dw_hdmi_rockchip_bind(struct device *dev, struct device *master,
 				 void *data)
@@ -481,7 +550,7 @@ static int dw_hdmi_rockchip_bind(struct device *dev, struct device *master,
 	drm_encoder_init(drm, encoder, &dw_hdmi_rockchip_encoder_funcs,
 			 DRM_MODE_ENCODER_TMDS, NULL);
 
-	ret = dw_hdmi_bind(dev, master, data, encoder, iores, irq, plat_data);
+	ret = dw_hdmi_bind(dev, master, data, encoder, iores, irq, plat_data, hdmi->regmap);
 
 	/*
 	 * If dw_hdmi_bind() fails we'll never call dw_hdmi_unbind(),

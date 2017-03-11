@@ -1,0 +1,27 @@
+#ifndef _RK3288_HDMI_H
+#define _RK3288_HDMI_H
+
+#define PHY_CONF0			0x3000
+#define v_TXPWRON_SIG(n)	(((n) & 0x01) << 3)
+#define m_TXPWRON_SIG		BIT(3)
+
+#define EXT_PHY_CONTROL			0
+#define EXT_PHY1_PLL_SPM_CTRL		0xa2
+#define EXT_PHY1_PLL_CTRL		0xa0
+#define EXT_PHY1_PLL_PRE_DIVIDER	0xa1
+#define EXT_PHY1_PLL_SPM_CTRL		0xa2
+#define EXT_PHY1_PLL_FB_DIVIDER		0xa3
+#define EXT_PHY_PCLK_DIVIDERA_MASK		0x1f
+#define EXT_PHY1_PCLK_DIVIDER1		0xa5
+#define EXT_PHY_PCLK_DIVIDERD_MASK		0x1f
+#define EXT_PHY1_PCLK_DIVIDER2		0xa6
+#define EXT_PHY1_TMDSCLK_DIVIDER	0xa4
+
+#define RK322XH_PLL_POWER_DOWN	(BIT(8) | BIT(8 + 16))
+#define RK322XH_PLL_POWER_UP	BIT(8 + 16)
+#define RK322XH_PLL_PDATA_DEN	BIT(7 + 16)
+#define RK322XH_PLL_PDATA_EN	(BIT(7) | BIT(7 + 16))
+
+#define RK322XH_GRF_SOC_CON3           0x040c
+
+#endif

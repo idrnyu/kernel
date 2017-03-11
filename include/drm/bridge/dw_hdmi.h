@@ -11,6 +11,7 @@
 #define __DW_HDMI__
 
 #include <drm/drmP.h>
+#include <linux/regmap.h>
 
 struct dw_hdmi;
 
@@ -25,6 +26,7 @@ enum dw_hdmi_devtype {
 	IMX6Q_HDMI,
 	IMX6DL_HDMI,
 	RK3288_HDMI,
+	RK3328_HDMI,
 	RK3399_HDMI,
 };
 
@@ -55,26 +57,47 @@ struct dw_hdmi_phy_config {
 	u16 vlev_ctr;   /* voltage level control */
 };
 
+struct inno_phy_config_tab {
+	unsigned long	pix_clock;
+	u32	tmdsclock;
+	u8	color_depth;
+	u8	pll_nd;
+	u16	pll_nf;
+	u8	tmsd_divider_a;
+	u8	tmsd_divider_b;
+	u8	tmsd_divider_c;
+	u8	pclk_divider_a;
+	u8	pclk_divider_b;
+	u8	pclk_divider_c;
+	u8	pclk_divider_d;
+	u8	vco_div_5;
+	u8	ppll_nd;
+	u8	ppll_nf;
+	u8	ppll_no;
+};
+
 struct dw_hdmi_plat_data {
 	enum dw_hdmi_devtype dev_type;
 	const struct dw_hdmi_audio_tmds_n *tmds_n_table;
 	const struct dw_hdmi_mpll_config *mpll_cfg;
 	const struct dw_hdmi_curr_ctrl *cur_ctr;
 	const struct dw_hdmi_phy_config *phy_config;
+	const struct inno_phy_config_tab *inno_phy_config;
 	enum drm_mode_status (*mode_valid)(struct drm_connector *connector,
 					   struct drm_display_mode *mode);
 };
 
 static inline bool is_rockchip(enum dw_hdmi_devtype dev_type)
 {
-	return dev_type == RK3288_HDMI || dev_type == RK3399_HDMI;
+	return dev_type == RK3288_HDMI || dev_type == RK3399_HDMI || dev_type == RK3328_HDMI;
 }
 
 void dw_hdmi_unbind(struct device *dev, struct device *master, void *data);
 int dw_hdmi_bind(struct device *dev, struct device *master,
 		 void *data, struct drm_encoder *encoder,
 		 struct resource *iores, int irq,
-		 const struct dw_hdmi_plat_data *plat_data);
+		 const struct dw_hdmi_plat_data *plat_data,
+		 struct regmap *regmap);
 void dw_hdmi_suspend(struct device *dev);
 void dw_hdmi_resume(struct device *dev);
 

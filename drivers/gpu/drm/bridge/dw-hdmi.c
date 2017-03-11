@@ -37,6 +37,7 @@
 
 #include "dw-hdmi.h"
 #include "dw-hdmi-audio.h"
+#include "inno-phy-hdmi.h"
 
 #define HDMI_EDID_LEN		512
 #define DDC_SEGMENT_ADDR       0x30
@@ -183,6 +184,7 @@ struct dw_hdmi_i2c {
 struct dw_hdmi {
 	struct drm_connector connector;
 	struct drm_encoder *encoder;
+	struct regmap *regmap;
 	struct drm_bridge *bridge;
 
 	struct platform_device *audio;
@@ -205,6 +207,7 @@ struct dw_hdmi {
 
 	struct i2c_adapter *ddc;
 	void __iomem *regs;
+	void __iomem *phy_regs;
 	bool sink_is_hdmi;
 	bool sink_has_audio;
 	bool hpd_state;
@@ -370,6 +373,18 @@ static void dw_hdmi_i2c_set_divs(struct dw_hdmi *hdmi)
 	hdmi_writeb(hdmi, div_low & 0xff, HDMI_I2CM_SS_SCL_LCNT_0_ADDR);
 	hdmi_writeb(hdmi, (div_low >> 8) & 0xff,
 		    HDMI_I2CM_SS_SCL_LCNT_1_ADDR);
+}
+
+static void inno_hdmi_phy_write(struct dw_hdmi *hdmi, int reg_addr, int val)
+{
+	writel_relaxed(val, hdmi->phy_regs + (reg_addr) * 0x04);
+}
+
+static int inno_hdmi_phy_read(struct dw_hdmi *hdmi, int reg_addr)
+{
+	int val = readl_relaxed(hdmi->phy_regs + (reg_addr) * 0x04);
+	val = val & 0xff;
+	return val;
 }
 
 static void dw_hdmi_i2c_init(struct dw_hdmi *hdmi)
@@ -1339,6 +1354,91 @@ static int hdmi_phy_configure(struct dw_hdmi *hdmi, unsigned char prep,
 	return 0;
 }
 
+static int inno_hdmi_phy_init(struct dw_hdmi *hdmi)
+{
+	int stat, temp, i;
+	const struct inno_phy_config_tab *phy_ext = NULL;
+	const struct inno_phy_config_tab *inno_phy_config;
+
+	pr_err("hdmi->previous_mode.clock = %d.\n", hdmi->previous_mode.clock);
+	inno_phy_config = hdmi->plat_data->inno_phy_config;
+	for (; inno_phy_config->pix_clock != ~0UL; inno_phy_config++) {
+		if ((inno_phy_config->pix_clock == hdmi->previous_mode.clock * 1000) &&
+		    (inno_phy_config->color_depth == 8)) {
+			phy_ext = inno_phy_config;
+			break;
+		}
+	}
+
+	if (!phy_ext) {
+		pr_err("xhc----%s no supported phy configuration.\n", __func__);
+		pr_err("hdmi->previous_mode.clock = %d.\n", hdmi->previous_mode.clock);
+		return -1;
+	}
+	regmap_write(hdmi->regmap, RK322XH_GRF_SOC_CON3,
+		     RK322XH_PLL_POWER_DOWN | RK322XH_PLL_PDATA_DEN);
+
+	inno_hdmi_phy_write(hdmi, EXT_PHY_CONTROL, 0xc0);
+	inno_hdmi_phy_write(hdmi, 0xa0, 0x04);
+	stat = (phy_ext->vco_div_5 & 1) << 1;
+	inno_hdmi_phy_write(hdmi, EXT_PHY1_PLL_CTRL, stat);
+	inno_hdmi_phy_write(hdmi, EXT_PHY1_PLL_PRE_DIVIDER, phy_ext->pll_nd);
+	stat = ((phy_ext->pll_nf >> 8) & 0x0f) | 0xf0;
+	inno_hdmi_phy_write(hdmi, EXT_PHY1_PLL_SPM_CTRL, stat);
+	stat = phy_ext->pll_nf & 0xff;
+	inno_hdmi_phy_write(hdmi, EXT_PHY1_PLL_FB_DIVIDER, stat);
+	stat = (phy_ext->pclk_divider_a & EXT_PHY_PCLK_DIVIDERA_MASK) |
+	       ((phy_ext->pclk_divider_b & 3) << 5);
+	inno_hdmi_phy_write(hdmi, EXT_PHY1_PCLK_DIVIDER1, stat);
+	stat = (phy_ext->pclk_divider_d & EXT_PHY_PCLK_DIVIDERD_MASK) |
+	       ((phy_ext->pclk_divider_c & 3) << 5);
+	inno_hdmi_phy_write(hdmi, EXT_PHY1_PCLK_DIVIDER2, stat);
+	stat = ((phy_ext->tmsd_divider_a & 3) << 4) |
+	       ((phy_ext->tmsd_divider_b & 3) << 2) |
+	       (phy_ext->tmsd_divider_c & 3);
+	inno_hdmi_phy_write(hdmi, EXT_PHY1_TMDSCLK_DIVIDER, stat);
+	inno_hdmi_phy_write(hdmi, 0xac, (phy_ext->ppll_nf & 0xff));
+
+	if (phy_ext->ppll_no == 1) {
+		inno_hdmi_phy_write(hdmi, 0xaa, 2);
+		stat = (phy_ext->ppll_nf >> 8) | phy_ext->ppll_nd;
+		inno_hdmi_phy_write(hdmi, 0xab, stat);
+	} else {
+		stat = ((phy_ext->ppll_no / 2) - 1);
+		inno_hdmi_phy_write(hdmi, 0xad, stat);
+		stat = (phy_ext->ppll_nf >> 8) | phy_ext->ppll_nd;
+		inno_hdmi_phy_write(hdmi, 0xab, stat);
+		inno_hdmi_phy_write(hdmi, 0xaa, 0x0e);
+	}
+
+	regmap_write(hdmi->regmap, RK322XH_GRF_SOC_CON3, RK322XH_PLL_POWER_UP);
+	usleep_range(900, 1000);
+
+	hdmi_modb(hdmi, v_TXPWRON_SIG(1), m_TXPWRON_SIG, PHY_CONF0);
+	while (i++ < 10000) {
+			if ((i % 10) == 0) {
+			stat = inno_hdmi_phy_read(hdmi, 0xa9);
+			temp = inno_hdmi_phy_read(hdmi, 0xaf);
+			if ((stat & 0x01) && (temp & 0x01))
+				break;
+			usleep_range(1000, 2000);
+		}
+	}
+
+	if (!(stat & 0x01) || !(temp & 0x01)) {
+		dev_err(hdmi->dev, "PHY PLL not locked: PCLK_ON=,TMDSCLK_ON=\n");
+	}
+	regmap_write(hdmi->regmap, RK322XH_GRF_SOC_CON3, RK322XH_PLL_PDATA_EN);
+
+	return 0;
+}
+
+
+static int inno_hdmi_phy_disable(struct dw_hdmi *hdmi)
+{
+	return 0;
+}
+
 static int dw_hdmi_phy_init(struct dw_hdmi *hdmi)
 {
 	int i, ret;
@@ -1818,7 +1918,11 @@ static int dw_hdmi_setup(struct dw_hdmi *hdmi, struct drm_display_mode *mode)
 	hdmi_av_composer(hdmi, mode);
 
 	/* HDMI Initializateion Step B.2 */
-	ret = dw_hdmi_phy_init(hdmi);
+	if (hdmi->dev_type == RK3328_HDMI)
+		ret = inno_hdmi_phy_init(hdmi);
+	else
+		ret = dw_hdmi_phy_init(hdmi);
+
 	if (ret)
 		return ret;
 
@@ -1916,7 +2020,10 @@ static void dw_hdmi_poweron(struct dw_hdmi *hdmi)
 
 static void dw_hdmi_poweroff(struct dw_hdmi *hdmi)
 {
-	dw_hdmi_phy_disable(hdmi);
+	if (hdmi->dev_type == RK3328_HDMI)
+		inno_hdmi_phy_disable(hdmi);
+	else
+		dw_hdmi_phy_disable(hdmi);
 	hdmi->bridge_is_on = false;
 }
 
@@ -2013,7 +2120,6 @@ dw_hdmi_connector_detect(struct drm_connector *connector, bool force)
 {
 	struct dw_hdmi *hdmi = container_of(connector, struct dw_hdmi,
 					     connector);
-
 	mutex_lock(&hdmi->mutex);
 	hdmi->force = DRM_FORCE_UNSPECIFIED;
 	dw_hdmi_update_power(hdmi);
@@ -2426,13 +2532,16 @@ static void dw_hdmi_register_debugfs(struct device *dev, struct dw_hdmi *hdmi)
 int dw_hdmi_bind(struct device *dev, struct device *master,
 		 void *data, struct drm_encoder *encoder,
 		 struct resource *iores, int irq,
-		 const struct dw_hdmi_plat_data *plat_data)
+		 const struct dw_hdmi_plat_data *plat_data,
+		 struct regmap *regmap)
 {
 	struct drm_device *drm = data;
 	struct device_node *np = dev->of_node;
 	struct platform_device_info pdevinfo;
 	struct device_node *ddc_node;
 	struct dw_hdmi *hdmi;
+	struct resource *phy_res;
+	struct platform_device *pdev = to_platform_device(dev);
 	int ret;
 	u32 val = 1;
 	u8 config0;
@@ -2450,6 +2559,7 @@ int dw_hdmi_bind(struct device *dev, struct device *master,
 	hdmi->dev_type = plat_data->dev_type;
 	hdmi->sample_rate = 48000;
 	hdmi->encoder = encoder;
+	hdmi->regmap = regmap;
 	hdmi->disabled = true;
 	hdmi->rxsense = true;
 	hdmi->phy_mask = (u8)~(HDMI_PHY_HPD | HDMI_PHY_RX_SENSE);
@@ -2508,6 +2618,16 @@ int dw_hdmi_bind(struct device *dev, struct device *master,
 	hdmi->regs = devm_ioremap_resource(dev, iores);
 	if (IS_ERR(hdmi->regs))
 		return PTR_ERR(hdmi->regs);
+
+	if (hdmi->dev_type == RK3328_HDMI) {
+		phy_res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+                if (!phy_res)
+                        return -ENXIO;
+
+                hdmi->phy_regs = devm_ioremap_resource(&pdev->dev, phy_res);
+                if (IS_ERR(hdmi->phy_regs))
+                        return PTR_ERR(hdmi->phy_regs);
+	}
 
 	hdmi->isfr_clk = devm_clk_get(hdmi->dev, "isfr");
 	if (IS_ERR(hdmi->isfr_clk)) {
@@ -2622,11 +2742,8 @@ int dw_hdmi_bind(struct device *dev, struct device *master,
 		pdevinfo.dma_mask = DMA_BIT_MASK(32);
 		hdmi->audio = platform_device_register_full(&pdevinfo);
 	}
-
 	dev_set_drvdata(dev, hdmi);
-
 	dw_hdmi_register_debugfs(dev, hdmi);
-
 	return 0;
 
 err_iahb:
