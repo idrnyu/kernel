@@ -149,6 +149,14 @@
 	cpu-supply = <&vdd_arm>;
 };
 
+&display_subsystem {
+	status = "okay";
+};
+
+&hdmi {
+	status = "okay";
+};
+
 &sdio {
 	bus-width = <4>;
 	cap-sd-highspeed;
@@ -204,6 +212,14 @@
 	tx_delay = <0x26>;
 	rx_delay = <0x11>;
 	status = "disabled";
+};
+
+&vpu_combo {
+	status = "okay";
+};
+
+&rkvdec {
+	status = "okay";
 };
 
 &gpu {
@@ -271,6 +287,10 @@
 };
 
 &usbdrd_dwc3 {
+	status = "okay";
+};
+
+&vop {
 	status = "okay";
 };
 
