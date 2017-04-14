@@ -74,6 +74,7 @@ struct inno_phy_config_tab {
 	u8	ppll_nd;
 	u8	ppll_nf;
 	u8	ppll_no;
+	u8	version;
 };
 
 struct dw_hdmi_plat_data {

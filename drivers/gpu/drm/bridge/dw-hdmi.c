@@ -1364,7 +1364,8 @@ static int inno_hdmi_phy_init(struct dw_hdmi *hdmi)
 	inno_phy_config = hdmi->plat_data->inno_phy_config;
 	for (; inno_phy_config->pix_clock != ~0UL; inno_phy_config++) {
 		if ((inno_phy_config->pix_clock == hdmi->previous_mode.clock * 1000) &&
-		    (inno_phy_config->color_depth == 8)) {
+		    (inno_phy_config->color_depth == 8) &&
+		    (2 & inno_phy_config->version)) {
 			phy_ext = inno_phy_config;
 			break;
 		}
@@ -2471,9 +2472,16 @@ static int dw_hdmi_phy_show(struct seq_file *s, void *v)
 	u32 i;
 
 	seq_puts(s, "\n>>>hdmi_phy reg ");
-	for (i = 0; i < 0x28; i++)
-		seq_printf(s, "regs %02x val %04x\n",
-			   i, hdmi_phy_i2c_read(hdmi, i));
+	if (hdmi->dev_type == RK3328_HDMI) {
+		for (i = 0; i < 0x100; i++)
+			seq_printf(s, "regs %02x val %04x\n",
+                                   i, inno_hdmi_phy_read(hdmi, i));
+
+	} else {
+		for (i = 0; i < 0x28; i++)
+			seq_printf(s, "regs %02x val %04x\n",
+				   i, hdmi_phy_i2c_read(hdmi, i));
+	}
 	return 0;
 }
 

@@ -38,6 +38,7 @@ struct rockchip_hdmi {
 	enum dw_hdmi_devtype dev_type;
 	struct clk *vpll_clk;
 	struct clk *grf_clk;
+	struct clk *hdmiphy_pclk;
 };
 
 #define to_rockchip_hdmi(x)	container_of(x, struct rockchip_hdmi, x)
@@ -200,50 +201,65 @@ static int rockchip_hdmi_update_phy_table(struct rockchip_hdmi *hdmi,
 const struct inno_phy_config_tab inno_pll_table[] = {
 	{27000000,	27000000,	8,	1,	90,	3,	2,
 		2,	10,	3,	3,	4,	0,	1,	40,
-		8},
+		8,	1},
+	{27000000,	27000000,	8,	1,	90,	3,	2,
+		2,	10,	3,	3,	4,	0,	1,	80,
+		8,	2},
 	{27000000,	33750000,	10,	1,	90,	1,	3,
 		3,	10,	3,	3,	4,	0,	1,	40,
-		8},
+		8,	1},
+	{27000000,	33750000,	10,	1,	90,	1,	3,
+		3,	10,	3,	3,	4,	0,	1,	80,
+		8,	2},
 	{40000000,      40000000,       8,      1,      80,     2,      2,
 		2,      12,     2,      2,      2,      0,      1,      40,
-		8},
+		8,	1},
 	{59400000,	59400000,	8,	1,	99,	3,	2,
 		2,	1,	3,	3,	4,	0,	1,	40,
-		8},
+		8,	1},
+	{59400000,	59400000,	8,	1,	99,	3,	1,
+		1,	1,	3,	3,	4,	0,	18,	80,
+		8,	2},
 	{59400000,	74250000,	10,	1,	99,	1,	2,
 		2,	1,	3,	3,	4,	0,	1,	40,
-		8},
+		8,	1},
+	{59400000,	74250000,	10,	1,	99,	0,	3,
+		3,	1,	3,	3,	4,	0,	18,	80,
+		8,	2},
 	{74250000,	74250000,	8,	1,	99,	1,	2,
 		2,	1,	2,	3,	4,	0,	1,	40,
-		8},
+		8,	1},
+	{74250000,	74250000,	8,	1,	99,	1,	2,
+		2,	1,	2,	3,	4,	0,	18,	80,
+		8,	2},
 	{74250000,	92812500,	10,	4,	495,	1,	2,
 		2,	1,	3,	3,	4,	0,	2,	40,
-		4},
+		4,	3},
 	{148500000,	148500000,	8,	1,	99,	1,	1,
 		1,	1,	2,	2,	2,	0,	2,	40,
-		4},
+		4,	3},
 	{148500000,	185625000,	10,	4,	495,	0,	2,
 		2,	1,	3,	2,	2,	0,	4,	40,
-		2},
+		2,	3},
 	{297000000,	297000000,	8,	1,	99,	0,	1,
 		1,	1,	0,	2,	2,	0,	4,	40,
-		2},
+		2,	3},
 	{297000000,	371250000,	10,	4,	495,	1,	2,
 		0,	1,	3,	1,	1,	0,	8,	40,
-		1},
+		1,	3},
 	{594000000,	297000000,	8,	1,	99,	0,	1,
 		1,	1,	0,	2,	1,	0,	4,	40,
-		2},
+		2,	3},
 	{594000000,	371250000,	10,	4,	495,	1,	2,
 		0,	1,	3,	1,	1,	1,	8,	40,
-		1},
+		1,	3},
 	{594000000,	594000000,	8,	1,	99,	0,	2,
 		0,	1,	0,	1,	1,	0,	8,	40,
-		1},
+		1,	3},
 
 	{ ~0UL,	     	0, 		0, 	0,	0,	0,	0,
 		0,	0,	0,	0,	0,	0,	0,	0,
-		0},
+		0,	0},
 };
 
 static int rockchip_hdmi_parse_dt(struct rockchip_hdmi *hdmi)
@@ -251,15 +267,6 @@ static int rockchip_hdmi_parse_dt(struct rockchip_hdmi *hdmi)
 	struct device_node *np = hdmi->dev->of_node;
 	int ret, val, phy_table_size;
 	u32 *phy_config;
-
-	if (hdmi->dev_type == RK3328_HDMI) {
-		hdmi->regmap = syscon_regmap_lookup_by_phandle(np, "rockchip,grf");
-		if (IS_ERR(hdmi->regmap)) {
-			dev_err(hdmi->dev, "Unable to get rockchip,grf\n");
-			return PTR_ERR(hdmi->regmap);
-		}
-		return 0;
-	}
 
 	hdmi->regmap = syscon_regmap_lookup_by_phandle(np, "rockchip,grf");
 	if (IS_ERR(hdmi->regmap)) {
@@ -287,9 +294,25 @@ static int rockchip_hdmi_parse_dt(struct rockchip_hdmi *hdmi)
 		return PTR_ERR(hdmi->grf_clk);
 	}
 
+	hdmi->hdmiphy_pclk = devm_clk_get(hdmi->dev, "pclk_hdmiphy");
+	if (PTR_ERR(hdmi->hdmiphy_pclk) == -ENOENT) {
+                hdmi->hdmiphy_pclk = NULL;
+        } else if (PTR_ERR(hdmi->hdmiphy_pclk) == -EPROBE_DEFER) {
+                return -EPROBE_DEFER;
+        } else if (IS_ERR(hdmi->hdmiphy_pclk)) {
+                dev_err(hdmi->dev, "failed to get pclk_hdmiphy clock\n");
+                return PTR_ERR(hdmi->hdmiphy_pclk);
+        }
+
 	ret = clk_prepare_enable(hdmi->vpll_clk);
 	if (ret) {
 		dev_err(hdmi->dev, "Failed to enable HDMI vpll: %d\n", ret);
+		return ret;
+	}
+
+	ret = clk_prepare_enable(hdmi->hdmiphy_pclk);
+	if (ret) {
+		dev_err(hdmi->dev, "Failed to eanble HDMI pclk_hdmiphy: %d\n", ret);
 		return ret;
 	}
 
