@@ -457,6 +457,10 @@
 	status = "okay";
 };
 
-&hdmi {
+&h265e {
+	status = "okay";
+};
+
+&vepu {
 	status = "okay";
 };
