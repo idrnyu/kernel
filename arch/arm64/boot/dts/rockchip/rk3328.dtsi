@@ -1677,6 +1677,11 @@
 		};
 
 		sdmmc0 {
+			sdmmc0_pwren: sdmmc0-pwren {
+				rockchip,pins =
+					<0 RK_PD6 RK_FUNC_GPIO &pcfg_pull_none>;
+			};
+
 			sdmmc0_clk: sdmmc0-clk {
 				rockchip,pins =
 					<1 RK_PA6 RK_FUNC_1 &pcfg_pull_none_4ma>;
